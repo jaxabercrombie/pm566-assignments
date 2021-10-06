@@ -1,0 +1,241 @@
+---
+title: "Assignment 1"
+author: "Jaxon Abercrombie"
+date: "9/24/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### [Step 1]{.ul}
+
+**PM~2.5~ California Data for 2004**
+
+```{r}
+data04 <- read.csv("pm25ca2004.csv") # Load in data
+dim(data04) # Check dimensions
+names(data04) # Check variable names
+str(data04) # Check variable types
+```
+
+**PM~2.5~ California Data for 2019**
+
+```{r}
+data19 <- read.csv("pm25ca2019.csv")
+dim(data19)
+head(data19)
+tail(data19)
+names(data19)
+str(data19) 
+```
+
+**Checking The Key Variable from Each Data Set**
+
+```{r}
+summary(data04) # Summarize variables to gain insight
+summary(data04$Daily.Mean.PM2.5.Concentration) # Summarize key variable
+sum(is.na(data04)) # Check if data has any missing values
+sum(is.na(data04$Daily.Mean.PM2.5.Concentration)) # Check key variable too
+
+summary(data19)
+summary(data19$Daily.Mean.PM2.5.Concentration)
+sum(is.na(data19))
+sum(is.na(data19$Daily.Mean.PM2.5.Concentration))
+```
+
+Based on the summary of our key variable *Daily.Mean.PM2.5.Concentration*, minimum values reach below values of zero, which is not possible for something like particulate matter concentration. Because of this, we will also run extra code that removes these instances from our data sets. Furthermore, there was no missing data for *Daily.Mean.PM2.5.Concentration,* so there is no need for removal of missing data.
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(data.table)
+
+data04 <- data04 %>%
+    filter(Daily.Mean.PM2.5.Concentration > 0)
+summary(data04$Daily.Mean.PM2.5.Concentration) # Recheck minimum value
+setorder(data04, Daily.Mean.PM2.5.Concentration) # Order by PM conc.
+head(data04) # Check headers after ordering
+tail(data04) # Check footers after ordering
+
+data19 <- data19 %>%
+    filter(Daily.Mean.PM2.5.Concentration > 0)
+summary(data19$Daily.Mean.PM2.5.Concentration)
+setorder(data19, Daily.Mean.PM2.5.Concentration)
+head(data19)
+tail(data19)
+```
+
+After filtering out negative concentration values and ordering the data set, *head()* and *tail()* confirmed that the data removed negative values and is ordered. The data can now be deemed ready for analysis---but the next step will combine our two frames.
+
+### Step 2
+
+**Combining the Two Years of Data**
+
+```{r}
+dataMerged <- merge(x = data04,y = data19, all=TRUE) # Merge two sets
+dataMerged$Date <-  as.Date(dataMerged$Date,"%m/%d/%Y") #Reformat as date
+dataMerged$Year <- as.numeric(format(dataMerged$Date,'%Y')) # Extract year
+summary(dataMerged$Year) # Confirm new column
+```
+
+**Changing Names of Variables**
+
+```{r}
+dataMerged <- 
+  rename(dataMerged, 
+         dailyConc = Daily.Mean.PM2.5.Concentration, # Renaming of column structure
+         lat = SITE_LATITUDE,
+         long = SITE_LONGITUDE,
+         siteName = Site.Name,
+         siteID = Site.ID)
+```
+
+### Step 3
+
+**Locations of Sites Using *leaflet()***
+
+```{r}
+library(leaflet)
+
+temp.pal <- colorFactor(c("#A3C41B", "#438A7D"), domain = dataMerged$Year) # Palette creation
+  
+leaflet(dataMerged) %>% # Chunk adapted from lecture and online examples of leaflet()
+  addProviderTiles('CartoDB.Positron') %>%
+  addCircles(
+    lat = ~lat, lng = ~long, color = ~temp.pal(Year),
+    opacity = 1, fillOpacity = 1, radius = 100) %>%
+  addLegend('bottomleft', pal=temp.pal, values=dataMerged$Year,
+            title='Temperature, C', opacity=1)
+```
+
+Based on the produced map, there are clearly more sites in 2019 than 2004, which is also evident with the earlier dimension checks of the respective data sets. This could be because of an increasing importance of monitoring pollutant data and related funding over the fifteen year gap. Additionally, the number of sites appear to be related to population density, with largely populous areas like the San Francisco Bay Area, Greater Los Angeles area, and San Diego having the most sites. This makes sense in many regards. Because pollution often follows people (transportation, polluting habits, etc.), reporting on places that likely have the most environmental damage make sense. Furthermore, if such reporting can be relevant to more residents (population density), then it would be strategic to understand an area's pollution more. Overall, urban areas are well-represented in this combined data set.
+
+### Step 4
+
+**Checking for Missing Values of PM~2.5~ in Combined Data Set**
+
+```{r}
+sum(is.na(dataMerged$dailyConc)) # Count if there are missing values
+mean(is.na(dataMerged$dailyConc)) # Average the missing values, if any
+```
+
+It appears there are no missing values in the data set, for these were removed earlier in the data preparation stage of the assignment.
+
+**Checking for Implausible Values of PM~2.5~ in Combined Data Set**
+
+```{r}
+setorder(dataMerged, -dailyConc) # Arrange by decreasing order to view high anomalies
+dataMerged %>%
+  select(Date, dailyConc, DAILY_AQI_VALUE, siteName) # Show specific data wanted to view
+```
+
+Extremely small concentrations of PM~2.5~ are possible, making them plausible for any given pollution data set. Efforts were then focused on high concentrations to ensure they were not implausible or lying outside of expected levels. By ordering daily concentrations of PM~2.5~ in decreasing order, the largest concentration recordings were shown at the top. The two highest measurements (251.0 ug/m^3^ LC and 170.4 ug/m^3^ LC) happened in Yosemite during the summer of 2004. AQI was similarly high on the same measurements (301 and 221, respectively), which gives more evidence that the numbers may be valid. Doing some external internet searches revealed that wildfires are frequent in the area, and AQI between 301-500 is for wildfires while PM~2.5~ concentration above 250 is as well ( [EPA](https://blissair.com/what-is-pm-2-5.htm) below). For this reason, implausibility seems less likely for these two instances.
+
+### Step 5
+
+**Exploratory Plots and Summary Statistics by State**
+
+```{r}
+library(ggplot2)
+# Histogram
+ggplot(dataMerged, aes(x = dailyConc)) +
+  geom_histogram(bins = 150, fill = "gray", color = "navy") +
+  facet_wrap(. ~ Year) +
+  xlim(0,100)
+
+# Boxplot
+ggplot(dataMerged, aes(x = dailyConc)) +
+  geom_boxplot(color = "navy") +
+  facet_wrap(. ~ Year)
+
+# Line plot
+ggplot(dataMerged, aes(y = dailyConc, x = Date)) +
+  geom_line(color = "navy") +
+  facet_wrap(scales = "free", . ~ Year)
+
+# Summarize
+dataMerged %>%
+  group_by(Year) %>%
+  summarise(mean = mean(dailyConc), # Various summary stats
+            median = median(dailyConc),
+            sd = sd(dailyConc),
+            min = min(dailyConc),
+            max = max(dailyConc),
+            IQR = IQR(dailyConc))
+  
+```
+
+Because this merged data set solely holds data from California (as marked when downloaded), no filtering or sorting by a geographic-related variable was needed. Therefore, only so many figures were produced from this specific spatial level. Regardless, there are definitely takeaways when viewing the difference between California in 2004 and 2019:
+
+-   California reported more measurements of particular matter overall, as indicated by a substantially greater count on the created histogram
+
+-   The histogram depicts a positive skew of PM~2.5~ concentration for both years, which is obviously preferable to a negative skew for health reasons
+
+-   The boxplot demonstrates that 2004 had a larger IQR, median, as well as maximum value of daily PM~2.5~ concentration
+
+-   The line plot exhibits a stable year of PM~2.5~ concentration for 2004 while 2019 appears to have more relatively high PM~2.5~ days every so often
+
+    -   From the looks of it, the outlier in the 2004 data may be causing some vast differences for our later data summary when looking at the mean data
+
+-   According to the summary statistics created, 2004 reported a higher average PM~2.5~ concentration than 2019 (13.16 ug/m^3^ LC vs. 7.79 ug/m^3^ LC, respectively), as well as a higher IQR, median, standard deviation, and maximum measurement as previously discussed regarding Yosemite wildfires
+
+    -   Again, the dramatically high outliers from Yosemite in the 2004 data set may be contributing to some of these vast statistical differences
+
+**Exploratory Plots and Summary Statistics by County**
+
+```{r}
+# Plot to compare counties among each other and between 2004 and 2019
+ggplot(dataMerged) +
+  geom_point(mapping = aes(x = COUNTY, y = dailyConc, colour = factor(Year))) +
+  scale_color_manual(values=c("#A3C41B", "#438A7D")) +
+  labs(x = "County", y = "PM2.5 Concentration (ug/m^3 LC)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5, size = 5))
+
+# Summary
+dataMerged %>%
+  group_by(COUNTY, Year) %>% # COUNTY before year to see same county data side-by-side
+  summarise(mean = mean(dailyConc),
+            median = median(dailyConc),
+            sd = sd(dailyConc),
+            min = min(dailyConc),
+            max = max(dailyConc),
+            IQR = IQR(dailyConc))
+```
+
+Based on the output when stratifying by county, it appears that majority of counties experienced an overall decrease in PM~2.5~ concentration between 2004 and 2019. Some appear to be anomalies, like San Joaquin and Tehama counties. This may be because some areas experienced an actual increase in pollutants or may not have been reporting in the year 2004 to begin with. Additionally, this gives us more insight to compare counties, and the figure demonstrates that Mariposa County experienced dramatically high PM~2.5~ concentration in 2004 compared to other counties, while Lake County has had the lowest PM~2.5~ concentration to date among all CA counties.
+
+The statistical summary output confirms the proposal that majority of counties reduced their average PM~2.5~ concentration and provides more insight into how many also reduced their respective maximum measurements, IQRs, medians, and even standard deviations. Overall, the reduction in pollutant concentration is evident.
+
+**Exploratory Plots and Summary Statistics by site in Los Angeles**
+
+```{r}
+# Plot to compare counties among each other and between 2004 and 2019
+dataLA <- 
+  dataMerged %>%
+  filter(COUNTY == "Los Angeles") # Take out other counties' data
+
+ggplot(dataLA) +
+  geom_point(mapping = aes(x = siteName, y = dailyConc, colour = factor(Year))) +
+  scale_color_manual(values=c("#437B8A", "#F8C228")) +
+  labs(x = "LA Site Name", y = "PM2.5 Concentration (ug/m^3 LC)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5, size = 5))
+
+# Summary
+dataLA %>%
+  group_by(siteName, Year) %>%
+  summarise(mean = mean(dailyConc),
+            median = median(dailyConc),
+            sd = sd(dailyConc),
+            min = min(dailyConc),
+            max = max(dailyConc),
+            IQR = IQR(dailyConc))
+```
+
+Based on the LA-specific figure, it is clear that some sites were not around in the year 2004, with only eight sites having existed in both of the investigated years. Those eight all experienced decreases in PM~2.5~ concentration, and the other sites all had relatively low measurementsin 2019 regardless.
+
+Much like the stratified county data, the summary statistics give quantified information as to how much each site changed in the fifteen year span. Not including the maximum value of the Reseda site, each statistic decreased from 2004 to 2019 for sites that had information for both. Overall, it appears Los Angeles County in particular has also experienced a decrease in particular matter concentrations.
