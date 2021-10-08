@@ -2,13 +2,298 @@
 title: "Assignment 2"
 author: "Jaxon Abercrombie"
 date: "10/6/2021"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
-
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(gtools)
+library(ggpmisc)
+library(leaflet)
 ```
 
-```{r setup, include=FALSE}
+### Data Wrangling
 
+#### Read in the Data
+
+```{r dataread}
+chsInd <- read.csv("chs_individual.csv")
+chsReg <- read.csv("chs_regional.csv")
+chsCombo <- smartbind(chsInd, chsReg)
+
+# Check location variable to ensure no N/As
+sum(is.na(chsCombo$townname))
 ```
+
+#### Q1
+
+```{r checkdim-impute, warnings = FALSE, message=FALSE}
+# Check dimensions to ensure no duplicates
+dim(chsInd)
+dim(chsReg)
+dim(chsCombo)
+
+# The combo of the two data sets has the sum of the two row values from the dim() function
+# To ensure there are not duplicates...
+chsCombo <- unique(chsCombo)
+chsCombo <- data.table(chsCombo)
+
+# Impute values for those that are missing; to continuous variables only
+chsMH <- 
+  chsCombo %>%
+  filter (male == 1 & hispanic == 1)
+
+chsCombo[is.na(agepft), agepft := mean(chsMH$agepft, na.rm = TRUE)]
+chsCombo[is.na(height), height := mean(chsMH$height, na.rm = TRUE)]
+chsCombo[is.na(weight), weight := mean(chsMH$weight, na.rm = TRUE)]
+chsCombo[is.na(bmi), bmi := mean(chsMH$bmi, na.rm = TRUE)]
+chsCombo[is.na(fev), fev := mean(chsMH$fev, na.rm = TRUE)]
+chsCombo[is.na(fvc), fvc := mean(chsMH$fvc, na.rm = TRUE)]
+chsCombo[is.na(mmef), mmef := mean(chsMH$mmef, na.rm = TRUE)]
+chsCombo[is.na(educ_parent), educ_parent := mean(chsMH$educ_parent, na.rm = TRUE)]
+chsCombo[is.na(male), male := round(mean(chsMH$male, na.rm = TRUE), 1)]
+chsCombo[is.na(asthma), asthma := round(mean(chsMH$asthma, na.rm = TRUE), 1)]
+chsCombo[is.na(smoke), smoke := round(mean(chsMH$smoke, na.rm = TRUE), 1)]
+chsCombo[is.na(gasstove), gasstove := round(mean(chsMH$educ_parent, na.rm = TRUE), 1)]
+```
+
+#### Q2
+
+```{r bmi-level, warnings = FALSE}
+# BMI; Numerical to categorical
+chsCombo$bmiCat <- cut(chsCombo$bmi, 
+                       breaks = c(0,14,22,24,Inf),
+                       labels = c("underweight", "normal", "overweight", "obese"))
+
+# Ensure coding is correct by viewing range of values within each BMI category
+chsCombo %>%
+  group_by(bmiCat) %>%
+  summarize(
+    min = min(bmi),
+    max = max(bmi),
+    count = n()  
+  )
+```
+
+#### Q3
+
+```{r smoke-gas}
+# Some values of gasstove are 2, which would create NAs in our smoke_gas_exposure variable
+# This is corrected by adding the "| 2" in our code to allow 1 or 2 to be for gasstove
+# Create smoke and gas exposure variable, ensuring the 4 different combinations are taken care of
+chsCombo <-
+  chsCombo %>%
+  mutate(smoke_gas_exposure = case_when(smoke == 0 & gasstove == 0 ~ "neither",
+                                        smoke == 1 & gasstove == 0 ~ "smoke only",
+                                        smoke == 0 & gasstove == 1 ~ "gas stove only",
+                                        smoke == 0 & gasstove == 2 ~ "gas stove only",         
+                                        smoke == 1 & gasstove == 1 ~ "both",         
+                                        smoke == 1 & gasstove == 2 ~ "both"))
+
+# Check to see that there are 4 distinct categories and that they match the above code
+table(chsCombo$smoke_gas_exposure)
+sum(is.na(chsCombo$smoke_gas_exposure))
+```
+
+#### Q4
+
+```{r summary-tables}
+# By town
+chsCombo %>%
+  group_by(townname) %>%  
+  summarize(count = n(),
+          meanFEV = mean(fev),
+          sdFEV = sd(fev),
+          percAsthma = 100*mean(asthma, na.rm = TRUE),
+          sdAsthma = sd(asthma, na.rm = TRUE))
+
+# By sex
+chsCombo <- chsCombo %>%
+  mutate(sex = factor(male,
+                      levels = c(0,1),
+                      labels = c("male","female")))
+  
+chsCombo %>%
+  group_by(sex) %>%  
+  summarize(count = n(),
+          meanFEV = mean(fev),
+          sdFEV = sd(fev),
+          percAsthma = 100*mean(asthma, na.rm = TRUE),
+          sdAsthma = sd(asthma, na.rm = TRUE))
+
+
+# By obesity level
+chsCombo %>%
+  group_by(bmiCat) %>%  
+  summarize(count = n(),
+          meanFEV = mean(fev),
+          sdFEV = sd(fev),
+          percAsthma = 100*mean(asthma, na.rm = TRUE),
+          sdAsthma = sd(asthma, na.rm = TRUE))
+
+# By smoke and gas exposure
+chsCombo %>%
+  group_by(smoke_gas_exposure) %>%  
+  summarize(count = n(),
+          meanFEV = mean(fev, na.rm = TRUE),
+          sdFEV = sd(fev, na.rm = TRUE),
+          percAsthma = 100*mean(asthma, na.rm = TRUE),
+          sdAsthma = sd(asthma, na.rm = TRUE))
+```
+
+### Looking at the Data (EDA)
+
+The primary questions of interest are:
+
+1.  What is the association between BMI and FEV (forced expiratory volume)?
+
+2.  What is the association between smoke and gas exposure and FEV?
+
+3.  What is the association between PM2.5 exposure and FEV?
+
+**Check Data**
+
+```{r check-data}
+dim(chsCombo)
+```
+
+**Check Variables**
+
+```{r check-variables}
+str(chsCombo)
+summary(chsCombo)
+```
+
+Unlike last assignment, there are no negative minimum values that need to be dealt with. Though there are variables with NAs after the binding of the two data sets, they are within variables that are not used in the analysis of the three questions above. For that, we will keep them as is for now.
+
+**Check Variables More Closely**
+
+```{r check-variables-moreclosely}
+# summary() for numerical, table() for categorical
+summary(chsCombo$bmi)
+summary(chsCombo$fev)
+table(chsCombo$smoke_gas_exposure)
+summary(chsCombo$pm25_mass)
+```
+
+After looking more closely at the variables, each seems adequate with min, max, and other values. However, pm25_mass has 1200 missing values, since the chsInd data set did not provide any data for the variable pm25_mass. We can acknowledge that averaging 12 sites may not be representative to apply to 1200 instances, and since we only are using leaflet() and discovering an association, we can just use the 12 and see how it goes.
+
+**Q1**
+
+```{r q1}
+chsCombo %>%
+  ggplot(mapping = aes(x = bmi, y = fev, color = factor(townname))) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "#008080") +
+  stat_poly_eq(formula = y ~ x,
+               eq.with.lhs = "italic(hat(y))~`=`~",
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+               label.y = 1000,
+               parse = TRUE) +
+  labs(x = "BMI", y = "FEV") +
+  facet_wrap(~ factor(townname))
+```
+
+Based on the many scatter plots created, there is a clear relationship that an increase in BMI is associated with an increase in FEV. Of course, some towns experience a stronger association and some weaker. Though the linear association is not visible by points alone, the added linear regression lines appear to add more understanding of the data and the positive relationship involved.
+
+**Q2**
+
+```{r q2}
+chsCombo %>%
+  ggplot(aes(x = fev, fill = bmiCat)) + 
+  geom_histogram() +
+  scale_fill_manual(values = c("#B9BCCB","#9EA3BD","#6D759C","#535979")) +
+  labs(x = "FEV", y = "Count", fill = "BMI Category")
+
+chsCombo %>%
+  ggplot(aes(x = fev, fill = smoke_gas_exposure)) + 
+  geom_histogram() +
+  scale_fill_manual(values = c("#BDCCBA","#A5BD9F","#769C6D","#5A7853")) +
+  labs(x = "FEV", y = "Count", fill = "Smoke/Gas Exposure Category")
+```
+
+Based on the stacked histogram for BMI category, it is clear that the overweight and obese categories tend to have higher FEV, though they also have the greatest variance across X. Additionally, the plot demonstrates that normal BMI is the most abundant category of the 4. Normal BMI is generally normally distributed for FEV, but it has a clear outlier bin around 2100, which may just be a standard/common value for FEV.
+
+Based on the stacked histogram for smoke/gas exposure category, it appears that each of the four categories have similar means, for no category is as obviously skewed in a direction like that for BMI. The "both" and "gas stove only" categories are the most abundant of the four, and "smoke only" is a rare exposure type.
+
+**Q3**
+
+```{r q3}
+chsCombo %>%
+  ggplot(aes(x = bmiCat, fill = smoke_gas_exposure)) +
+  geom_bar() +
+  scale_fill_manual(values = c("#DD99BB","#2A9D8F","#E9C46A","#F4A261")) +
+  labs(x = "BMI Category", y = "Count", fill = "Smoke/Gas Exposure Category")
+```
+
+Based on the bar graph for BMI category, it is evident that "gas stove only" exposure takes up a similar proportion for each BMI category. Again, "normal" BMI has the greatest number of recorded values of smoke/gas exposure, and therefore may give a more representative idea of how smoke/gas exposure is distributed. The most abundant exposure category is "both," as seen by the pink topping off each created bar.
+
+**Q4**
+
+```{r q4}
+chsCombo %>%
+  ggplot() +
+  stat_summary(aes(x = bmiCat, y = fev, 
+             group = smoke_gas_exposure,
+             color = smoke_gas_exposure),
+             fun = mean, 
+             fun.max = max, 
+             fun.min = min) +
+  scale_color_manual(values = c("#DD99BB","#2A9D8F","#E9C46A","#F4A261")) +
+  labs(x = "BMI Category", y = "FEV", color = "Smoke/Gas Exposure Category")
+```
+
+The statistic summary graph for BMI category provides an abundance of information. The lines extending from each plotted average of FEV indicate the minimum and maximum FEV values for each BMI category. In most cases, it appears that the "gas stove only" category experiences the greatest variation in FEV, for its ranges are the largest among the 4 types. The average values of FEV for each category are fairly close to one another, with the "overweight" BMI category demonstrating the greatest differences in means. Furthermore, no particular smoke/gas exposure category appears to be the consistent largest or smallest across BMI category.
+
+**Q5**
+
+```{r q5}
+temp.pal <- colorFactor(palette ='Set3', domain=chsCombo$pm25_mass)
+
+leaflet(chsCombo[!is.na(pm25_mass)]) %>%
+  addProviderTiles('CartoDB.Positron') %>%
+  addCircles(
+    lat = ~lat, lng=~lon,
+    label = chsCombo$townname, color = ~ temp.pal(pm25_mass),
+    opacity = .9, fillOpacity = .9, radius = 800) %>%
+  addLegend('bottomleft', pal = temp.pal, values = chsCombo$pm25_mass,
+          title = 'PM25 Concentration', opacity = 1)
+```
+
+This plot gives more insight into geographic location of towns as PM2.5 differs. The lowest PM2.5 values appear closest to Santa Barbara and its neighboring towns. On the other hand, the greatest PM2.5 values appear closest to Los Angeles and the surrounding area.
+
+**Q6**
+
+```{r q6}
+chsCombo6 <-
+  chsCombo %>%
+  group_by(townname) %>%
+  mutate(fev = mean(fev))
+
+chsCombo6 %>%
+  ggplot(mapping = aes(x = pm25_mass, y = fev, color = factor(townname))) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "black") +
+  labs(x = "PM25 Concentration", y = "Average FEV")
+```
+
+This last plot provides the mean of FEV for each town and each town's PM2.5 concentration. Based on the regression line provided on the plot, it appears that an increase in PM2.5 concentration is associated with a decrease in FEV. While there are certainly larger residuals than others (Lake Gregory, Alpine) and some smaller than others (Mira Loma, Lake Elsinore), the points follow a generally linear pattern. Because of that, it seems evident that the negative correlation exists between the variables FEV and PM2.5.
+
+### Overall Question Answers
+
+1.  What is the association between BMI and FEV (forced expiratory volume)?
+
+    If someone has a higher BMI, they are more likely to have a higher FEV value.
+
+2.  What is the association between smoke and gas exposure and FEV?
+
+    There is less of a clear association between smoke and gas exposure and FEV. However, having "gas stove only" exposure appears to induce a higher FEV than other categories.
+
+3.  What is the association between PM2.5 exposure and FEV?
+
+    An increase in PM2.5 exposure is associated with a lower FEV.
