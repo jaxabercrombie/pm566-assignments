@@ -1,0 +1,10 @@
+name: "Jaxon's PM-566 Assignment 5 Website"
+output_dir: "."
+navbar:
+  title: "Assignment 5"
+  left:
+    - text: "Homepage"
+      href: index.html
+output:
+  html_document:
+    theme: sandstone

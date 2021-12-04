@@ -1,0 +1,174 @@
+---
+title: "Assignment 5"
+output: 
+    html_document:
+        toc: TRUE
+        toc_float: TRUE
+---
+
+This is my submission for Assignment \#5! I have three interactive plots below that make improvements on my midterm. These plots will be making an appearance on my final project website, which is exciting!
+
+```{r libraries, include = FALSE}
+library(tidyverse)
+library(plotly)
+library(cowplot)
+library(RCurl)
+library(scales)
+```
+
+```{r dataprepare, echo = FALSE, include = FALSE}
+# Read in the CSV files
+vaxCA <- read.csv("CA Vaccine Data.csv")
+covidCA <- read.csv("CA Deaths and Cases.csv")
+
+# Merge the first two datasets
+covidCA <-
+  covidCA %>%
+  mutate(county = area)
+
+vaxCA <-
+  vaxCA %>%
+  mutate(date = as.Date(vaxCA$date, "%m/%d/%Y"))
+
+mergedCA <- merge(vaxCA, covidCA, 
+                  by = c("date","county"),
+                  all.x = TRUE)
+
+mergedCA <-
+  mergedCA %>%
+  filter(date >= as.Date("2020-12-15")) %>%
+  filter(date <= as.Date("2021-11-03")) %>%
+  group_by(date, county) %>% 
+  summarise(across(c(total_doses,cumulative_total_doses,
+                     pfizer_doses,cumulative_pfizer_doses,
+                     moderna_doses,cumulative_moderna_doses,
+                     jj_doses,cumulative_jj_doses,
+                     partially_vaccinated,
+                     total_partially_vaccinated,fully_vaccinated,
+                     cumulative_fully_vaccinated,at_least_one_dose,
+                     cumulative_at_least_one_dose,population,
+                     cases,cumulative_cases,deaths,
+                     cumulative_deaths,total_tests,
+                     cumulative_total_tests,positive_tests,
+                     cumulative_positive_tests), mean, .groups = date))
+
+# Create other variables
+mergedCA <-
+  mergedCA %>%
+  mutate(dose_standard = (cumulative_total_doses/population),
+         pfizer_perc = ((cumulative_pfizer_doses/cumulative_total_doses)*100),
+         moderna_perc = ((cumulative_moderna_doses/cumulative_total_doses)*100),
+         jj_perc = ((cumulative_jj_doses/cumulative_total_doses)*100),
+         perc_vaccinated = (cumulative_fully_vaccinated/population)*100,
+         perc_partial = (cumulative_at_least_one_dose/population)*100)
+
+```
+
+$$\\[.1in]$$
+
+### [Figure 1: Vaccination Over Time]{.ul}
+
+```{r fig1, echo = FALSE, warning = FALSE}
+superior <- c("Butte", "Colusa", "Del Norte", "Glenn", "Humboldt", "Lake", "Lassen", "Mendocino", "Modoc", "Nevada", "Plumas", "Shasta", "Sierra", "Siskiyou", "Tehama", "Trinity")
+
+central <- c("Alpine", "Amador", "Calaveras", "El Dorado", "Fresno", "Inyo", "Kings", "Madera", "Mariposa", "Merced", "Mono", "Placer", "Sacramento", "San Joaquin", "Stanislaus", "Sutter", "Yuba", "Tulare", "Tuolumne", "Yolo")
+
+bay <- c("Alameda", "Contra Costa", "Marin", "Monterey", "Napa", "San Benito", "San Francisco", "San Mateo", "Santa Clara", "Santa Cruz", "Solano", "Sonoma")
+
+southern <- c("Imperial", "Kern", "Orange", "Riverside", "San Bernardino", "San Diego", "San Luis Obispo", "Santa Barbara", "Ventura", "Los Angeles")
+
+
+mergedCA <- 
+  mergedCA %>% 
+  mutate(region = case_when(county %in% superior ~ "Superior California",
+                            county %in% central ~ "Central California",
+                            county %in% bay ~ "Bay Area",
+                            county %in% southern ~ "Southern California")) %>%
+  mutate(County = county)
+
+
+plot <- 
+    mergedCA %>%
+    ggplot() + 
+    geom_line(aes(x = date, 
+                  y = cumulative_fully_vaccinated/population*100, 
+                  color = County)) +
+    labs(title = "Percent Fully Vaccinated Since Roll-out by Region", x = "Date", 
+         y = "Percent Fully Vaccinated") +
+  facet_wrap(~region)
+
+plotly <- ggplotly(plot)
+
+plotly
+```
+
+The figure above depicts how vaccine efforts have been across four main regions of California, with country-specific data illustrated for each region. Feel free to toggle with the available counties to make direct comparisons or remove unwanted lines! The data spans from the debut of the COVID-19 vaccine on December 15th, 2020 up until November 3rd, 2021 (as with all following figures). Each region has a comparable number of counties, making these groupings representative and more reliable for drawing conclusions.Generally, each region experienced similar uptake in vaccination, as seen with almost congruent plot shapes. Additionally, each region and respective county followed a similar path of surging after April 2021's eligibility expansion and began to slow quickly during summer of 2021. However, there are certainly some regional differences, like the Bay Area having the highest percent of fully vaccinated individuals and Superior California the lowest. Furthermore, regions vary in range of the percent of fully vaccinated individuals; the Bay Area has a range of about 20% between its lowest and highest performing counties, while Superior California has a difference of about 30% between its lowest and highest. Overall, it appears that urban areas (Bay Area and Southern California) have more vaccine uptake than rural areas (Central and Superior California) on average, which will be something to consider with subsequent figures on this website. Access comes to mind as an immediate hurdle for vaccination, as physical distance from urban centers may make rural living disadvantageous.
+
+$$\\[.1in]$$
+
+### [Fig 2: Doses, Cases, and Deaths]{.ul}
+
+```{r fig2, echo = FALSE, warning = FALSE}
+fig2 <- 
+  mergedCA %>%
+  ggplot(aes(group = region)) +
+  geom_line(mapping = aes(x = date, y = total_doses, color = "Doses Administered")) +
+  geom_line(mapping = aes(x = date, y = cases, color = "Case Count")) +
+  geom_line(mapping = aes(x = date, y = deaths, color = "Death Count")) +
+  labs(title = "Doses, Cases, and Deaths by Region", x = "Date", y = "Count") +
+  scale_colour_manual(values = c("Doses Administered"="#C78888", 
+                                   "Case Count"="#88C7C2", 
+                                   "Death Count"="#E7D366")) +
+  facet_wrap(~region, scales = "free_y", shrink = TRUE) +
+  scale_y_continuous(labels = comma) +
+  theme(legend.title = element_blank(), plot.title.position = "middle")
+  
+
+ggplotly(fig2, tooltip = c("x", "y"))
+```
+
+```{r test, echo = FALSE}
+mergedCA[is.na(mergedCA)] = 0
+```
+
+Figure 2 illustrates a potential relationship between vaccine uptake and cases and deaths. At first, individuals rushed to be vaccinated for their own safety, but some individuals remained hesitant and lacked motivation to become vaccinated for many months. Though, changes in cases and deaths due to variants made for rises in the number of vaccine doses administered. A rise in cases appeared to motivate greater vaccine uptake after the start of July 2021, likely because of the once novel Delta variant. Compared to the quasi-plateaus of vaccine uptake as seen in Figure 1, there are visible surges between July and October of 2021 for three regions, excluding the Bay Area. This relationship may also have been influenced by policy efforts to require vaccines in public spaces, eligibility for booster shots, and the realization of the effectiveness of vaccination. Nonetheless, it seems natural for people to protect themselves when a threat is imminent, despite prior sentiments against vaccination.
+
+$$\\[.1in]$$
+
+### [Fig 3: Vaccination by Company]{.ul}
+
+```{r fig3, echo = FALSE, warnings = FALSE, message=FALSE}
+mergedCA3 <-
+  mergedCA %>%
+  group_by(region,date) %>%
+  summarise(county = county,
+            region = region,
+            ave_moderna = ave(moderna_perc),
+            ave_pfizer = ave(pfizer_perc),
+            ave_jj = ave(jj_perc))
+
+mergedCA3[is.na(mergedCA3)] = 0
+
+
+fig3 <- 
+  mergedCA3 %>%
+  ggplot(aes(group = region)) +
+  geom_line(aes(x = date, y = ave_moderna, color = "Moderna")) +
+  geom_line(aes(x = date, y = ave_pfizer, color = "Pfizer")) +
+  geom_line(aes(x = date, y = ave_jj, color = "J&J")) +
+  scale_colour_manual(values = c("Moderna"="#C78888", 
+                                   "Pfizer"="#88C7C2", 
+                                   "J&J"="#E7D366")) +
+    labs(title = "Vaccination Efforts by Company", 
+         x = "Date", y = "Percent of Total Doses Administered") +
+    theme(legend.title = element_blank(), axis.title.y = element_text(hjust = -1.5)) +
+    facet_wrap(~region)
+
+ggplotly(fig3, tooltip = c("x", "y"))
+```
+
+Understanding how vaccination efforts differ by company may influence future roll-outs of vaccines, since timeliness of roll-out and targeting specific areas may make one company a preferable candidate compared to another. Evident in the figure above, the more "rural" regions tend to receive Moderna doses rather than the Pfizer doses that more "urban" regions tend to receive. Johnson & Johnson doses are limited across all regions, and even when accounting for J&J being single-dose, its impact appears limited. That could potentially be because of defects and withdrawal from markets at times. Assuming that populous urban areas were first to receive vaccines because of supply chain ease with product shipment at ports, Pfizer certainly made an impact. Being the first to reach the vaccine market and be prevalent in populous areas made for a sustainable difference in uptake. Despite Moderna's later debut as a COVID-19 vaccine company, its use surged quickly and ultimately remained dominant in Superior and Central California. Whether it was purposefully more available in those two regions is unknown, but its popularity may have been influenced by Pfizer's presence elsewhere. What appears most fascinating about the relationship between Moderna and Pfizer is that Moderna surpassed Pfizer at one point in each region, which may demonstrate a supply surge that lead to temporary or sustained success.
+
+### [Final Website]{.ul}
+
+Check out my final project website, featuring these three interactive plots, here!
